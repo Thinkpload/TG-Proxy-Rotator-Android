@@ -8,7 +8,6 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.net.InetSocketAddress
 import java.net.Socket
-import java.net.URI
 import java.util.concurrent.TimeUnit
 
 data class Proxy(
@@ -22,8 +21,6 @@ data class Proxy(
 }
 
 object ProxyRepository {
-
-    private val ipv4Re = Regex("""^\d{1,3}(\.\d{1,3}){3}$""")
 
     private val http = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
@@ -43,7 +40,7 @@ object ProxyRepository {
             }.getOrNull() ?: continue
 
             for (line in text.lineSequence()) {
-                val p = parse(line.trim()) ?: continue
+                val p = runCatching { parse(line.trim()) }.getOrNull() ?: continue
                 if (seen.add(p.key)) all.add(p)
             }
             if (all.size >= 200) break
@@ -60,20 +57,18 @@ object ProxyRepository {
     }
 
     private fun parse(line: String): Proxy? {
-        val normalized = when {
-            line.startsWith("tg://proxy?") -> line
-            line.startsWith("https://t.me/proxy?") ->
-                "tg://proxy?" + line.substringAfter("?")
+        val query = when {
+            line.startsWith("tg://proxy?") -> line.substringAfter("?")
+            line.startsWith("https://t.me/proxy?") -> line.substringAfter("?")
             else -> return null
         }
-        val query = URI(normalized.replace("tg://", "https://x/")).query ?: return null
         val params = query.split("&").mapNotNull {
-            val eq = it.indexOf('='); if (eq > 0) it.substring(0, eq) to it.substring(eq + 1) else null
+            val eq = it.indexOf('=')
+            if (eq > 0) it.substring(0, eq) to it.substring(eq + 1) else null
         }.toMap()
-        val server = params["server"] ?: return null
+        val server = params["server"]?.takeIf { it.isNotBlank() } ?: return null
         val port = params["port"]?.toIntOrNull() ?: return null
-        val secret = params["secret"] ?: return null
-        if (ipv4Re.matches(server)) return null
+        val secret = params["secret"]?.takeIf { it.isNotBlank() } ?: return null
         return Proxy(server, port, secret)
     }
 
